@@ -20,10 +20,11 @@ import (
 )
 
 const (
-	errCodePrefix     = "OBS-V1-L-AZURE"
-	errCodeBadRequest = errCodePrefix + "-400"
-	errCodeNotFound   = errCodePrefix + "-404"
-	errCodeInternal   = errCodePrefix + "-500"
+	errCodePrefix         = "OBS-V1-L-AZURE"
+	errCodeBadRequest     = errCodePrefix + "-400"
+	errCodeNotFound       = errCodePrefix + "-404"
+	errCodeInternal       = errCodePrefix + "-500"
+	errCodeNotImplemented = errCodePrefix + "-501"
 )
 
 // LogsHandler implements the generated StrictServerInterface backed by
@@ -288,7 +289,7 @@ func (h *LogsHandler) HandleAlertWebhook(ctx context.Context, request gen.Handle
 		)
 		return gen.HandleAlertWebhook500JSONResponse(makeError(gen.InternalServerError, errCodeInternal, "failed to forward alert to observer")), nil
 	}
-	status := gen.Success
+	status := gen.AlertWebhookResponseStatusSuccess
 	msg := "alert forwarded to observer"
 	return gen.HandleAlertWebhook200JSONResponse(gen.AlertWebhookResponse{
 		Status:  &status,
@@ -491,4 +492,3 @@ func capTotal(n int) int {
 	}
 	return n
 }
-

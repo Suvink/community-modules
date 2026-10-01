@@ -15,12 +15,14 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/monitor/query/azlogs"
 )
 
-type azlogsAPI interface {
+// QueryAPI is the slice of the Log Analytics query surface this client uses.
+type QueryAPI interface {
 	QueryWorkspace(ctx context.Context, workspaceID string, body azlogs.QueryBody,
 		options *azlogs.QueryWorkspaceOptions) (azlogs.QueryWorkspaceResponse, error)
 }
+
 type Client struct {
-	api          azlogsAPI
+	api          QueryAPI
 	workspaceID  string
 	queryTimeout time.Duration
 	logger       *slog.Logger
@@ -35,19 +37,29 @@ func NewClient(cred azcore.TokenCredential, cfg Config, logger *slog.Logger) (*C
 	if cfg.WorkspaceID == "" {
 		return nil, errors.New("loganalytics: WorkspaceID is required")
 	}
-	if cfg.QueryTimeout == 0 {
-		cfg.QueryTimeout = 30 * time.Second
-	}
 	api, err := azlogs.NewClient(cred, nil)
 	if err != nil {
 		return nil, fmt.Errorf("loganalytics: azlogs.NewClient: %w", err)
+	}
+	return NewClientWithQueryAPI(api, cfg, logger), nil
+}
+
+// NewClientWithQueryAPI builds a client over a caller-supplied query API.
+func NewClientWithQueryAPI(api QueryAPI, cfg Config, logger *slog.Logger) *Client {
+	if cfg.QueryTimeout == 0 {
+		cfg.QueryTimeout = 30 * time.Second
+	}
+	if logger == nil {
+		// The query paths log on degraded results, and an exported constructor
+		// makes a nil logger easy to pass by accident.
+		logger = slog.New(slog.DiscardHandler)
 	}
 	return &Client{
 		api:          api,
 		workspaceID:  cfg.WorkspaceID,
 		queryTimeout: cfg.QueryTimeout,
 		logger:       logger,
-	}, nil
+	}
 }
 
 // Ping issues a near-zero-cost query against ContainerLogV2 to validate

@@ -17,28 +17,20 @@ func BuildComponentLogsKQL(p ComponentLogsParams) string {
 	var sb strings.Builder
 
 	sb.WriteString(ContainerLogV2Table)
-	sb.WriteString("\n| where tostring(parse_json(tostring(KubernetesMetadata.podLabels))[")
-	sb.WriteString(kqlString(LabelNamespace))
-	sb.WriteString("]) == ")
-	sb.WriteString(kqlString(p.Namespace))
+	sb.WriteString("\n| where ")
+	sb.WriteString(podLabelEquals(LabelNamespace, p.Namespace))
 
 	if p.ComponentUID != "" {
-		sb.WriteString("\n| where tostring(parse_json(tostring(KubernetesMetadata.podLabels))[")
-		sb.WriteString(kqlString(LabelComponentUID))
-		sb.WriteString("]) == ")
-		sb.WriteString(kqlString(p.ComponentUID))
+		sb.WriteString("\n| where ")
+		sb.WriteString(podLabelEquals(LabelComponentUID, p.ComponentUID))
 	}
 	if p.ProjectUID != "" {
-		sb.WriteString("\n| where tostring(parse_json(tostring(KubernetesMetadata.podLabels))[")
-		sb.WriteString(kqlString(LabelProjectUID))
-		sb.WriteString("]) == ")
-		sb.WriteString(kqlString(p.ProjectUID))
+		sb.WriteString("\n| where ")
+		sb.WriteString(podLabelEquals(LabelProjectUID, p.ProjectUID))
 	}
 	if p.EnvironmentUID != "" {
-		sb.WriteString("\n| where tostring(parse_json(tostring(KubernetesMetadata.podLabels))[")
-		sb.WriteString(kqlString(LabelEnvironmentUID))
-		sb.WriteString("]) == ")
-		sb.WriteString(kqlString(p.EnvironmentUID))
+		sb.WriteString("\n| where ")
+		sb.WriteString(podLabelEquals(LabelEnvironmentUID, p.EnvironmentUID))
 	}
 
 	if len(p.LogLevels) > 0 {
@@ -144,6 +136,14 @@ func sortOrderOrDefault(s SortOrder) SortOrder {
 		return SortAsc
 	}
 	return SortDesc
+}
+
+// podLabelEquals renders an equality predicate against one pod label.
+// Pod labels live inside KubernetesMetadata.podLabels, a dynamic blob, so the
+// key is an index expression rather than a column.
+func podLabelEquals(key, value string) string {
+	return "tostring(parse_json(tostring(KubernetesMetadata.podLabels))[" +
+		kqlString(key) + "]) == " + kqlString(value)
 }
 
 func kqlString(s string) string {

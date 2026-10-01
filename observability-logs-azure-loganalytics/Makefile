@@ -3,7 +3,7 @@
 
 CFG_DIR := internal/api
 OAPI_CODEGEN_VERSION ?= v2.5.1
-SPEC := https://raw.githubusercontent.com/openchoreo/openchoreo/main/openapi/observability-logs-adapter-api.yaml
+SPEC ?= https://raw.githubusercontent.com/openchoreo/openchoreo/main/openapi/observability-logs-adapter-api.yaml
 
 .PHONY: oapi-codegen-install openapi-codegen unit-test build run
 

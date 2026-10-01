@@ -93,6 +93,48 @@ func rowString(row azlogs.Row, idx map[string]int, name string) string {
 	}
 }
 
+// levelEnvelopeKeys are the JSON fields checked, in order, for a level on a
+// structured log message. Shared with the KQL builder so the query filters on
+// the same level the response reports.
+var levelEnvelopeKeys = []string{"level", "logLevel", "severity", "severityText", "severity_text"}
+
+// levelKeywords is the ordered keyword scan applied to unstructured messages.
+// First match wins, so "INFO: retrying after ERROR" is an ERROR. Shared with
+// the KQL builder.
+//
+// FATAL and SEVERE fold into ERROR, matching what levelAliases already does on
+// the envelope path. Reporting them literally would put a level outside the
+// contract's DEBUG|INFO|WARN|ERROR filter enum, so logLevels=["ERROR"] would
+// silently miss a message whose text says FATAL - and the same message would
+// classify differently depending on whether it arrived structured.
+//
+// No entry for WARNING: "WARN" precedes it and is a prefix of it, so a WARNING
+// message is already matched, and a WARNING entry would only emit a dead
+// branch into the generated KQL.
+var levelKeywords = []struct{ Keyword, Level string }{
+	{"ERROR", "ERROR"},
+	{"FATAL", "ERROR"},
+	{"SEVERE", "ERROR"},
+	{"WARN", "WARN"},
+	{"INFO", "INFO"},
+	{"DEBUG", "DEBUG"},
+}
+
+// defaultLogLevel is what a message carrying no level marker at all reports.
+const defaultLogLevel = "INFO"
+
+// levelAliases normalise an envelope-supplied level. Ordered so the KQL
+// builder can render an equivalent ladder.
+var levelAliases = []struct {
+	From []string
+	To   string
+}{
+	{[]string{"WARNING"}, "WARN"},
+	{[]string{"INFORMATION", "INFORMATIONAL"}, "INFO"},
+	{[]string{"CRITICAL", "FATAL", "SEVERE"}, "ERROR"},
+	{[]string{"TRACE"}, "DEBUG"},
+}
+
 // resolveLogLevel mirrors the sibling adapters' two-step approach:
 //  1. If the message is structured JSON, check common level field names.
 //  2. Scan the message text for level keywords.
@@ -103,21 +145,19 @@ func rowString(row azlogs.Row, idx map[string]int, name string) string {
 // it from the message content instead.
 func resolveLogLevel(_, msg string) string {
 	// Step 1: structured JSON envelope (e.g. {"level":"info","msg":"..."})
-	if len(msg) > 0 && msg[0] == '{' {
-		var envelope map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(msg), &envelope); err == nil {
-			for _, key := range []string{"level", "logLevel", "severity", "severityText", "severity_text"} {
-				if raw, ok := envelope[key]; ok {
-					var s string
-					if err := json.Unmarshal(raw, &s); err == nil && s != "" {
-						return normalizeLevel(s)
-					}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(msg), &envelope); err == nil {
+		for _, key := range levelEnvelopeKeys {
+			if raw, ok := envelope[key]; ok {
+				var s string
+				if err := json.Unmarshal(raw, &s); err == nil && s != "" {
+					return normalizeLevel(s)
 				}
 			}
 		}
 	}
 
-	// Step 2: keyword scan of the message text — matches sibling adapter behaviour.
+	// Step 2: keyword scan of the message text - matches sibling adapter behaviour.
 	return extractLogLevel(msg)
 }
 
@@ -126,31 +166,25 @@ func resolveLogLevel(_, msg string) string {
 // Matches the logic used by the OpenSearch and AWS CloudWatch adapters.
 func extractLogLevel(msg string) string {
 	upper := strings.ToUpper(msg)
-	for _, level := range []string{"ERROR", "FATAL", "SEVERE", "WARN", "WARNING", "INFO", "DEBUG"} {
-		if strings.Contains(upper, level) {
-			if level == "WARNING" {
-				return "WARN"
-			}
-			return level
+	for _, kw := range levelKeywords {
+		if strings.Contains(upper, kw.Keyword) {
+			return kw.Level
 		}
 	}
-	return "INFO"
+	return defaultLogLevel
 }
 
 // normalizeLevel uppercases the level and maps known aliases.
 func normalizeLevel(s string) string {
-	switch strings.ToUpper(strings.TrimSpace(s)) {
-	case "WARNING":
-		return "WARN"
-	case "INFORMATION", "INFORMATIONAL":
-		return "INFO"
-	case "CRITICAL", "FATAL", "SEVERE":
-		return "ERROR"
-	case "TRACE":
-		return "DEBUG"
-	default:
-		return strings.ToUpper(strings.TrimSpace(s))
+	up := strings.ToUpper(strings.TrimSpace(s))
+	for _, a := range levelAliases {
+		for _, from := range a.From {
+			if up == from {
+				return a.To
+			}
+		}
 	}
+	return up
 }
 
 // rowTime parses an ISO-8601 timestamp cell. azlogs returns datetime

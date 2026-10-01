@@ -1,8 +1,6 @@
 # Observability Logs Module for Dynatrace
 
-|               |                                                                                                                                                                                         |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Code coverage | [![Codecov](https://codecov.io/gh/openchoreo/community-modules/branch/main/graph/badge.svg?component=observability_logs_dynatrace)](https://codecov.io/gh/openchoreo/community-modules) |
+[![Codecov](https://codecov.io/gh/openchoreo/community-modules/branch/main/graph/badge.svg?flag=observability-logs-dynatrace)](https://app.codecov.io/gh/openchoreo/community-modules?flags%5B0%5D=observability-logs-dynatrace)
 
 This module collects container logs using [Fluent Bit](https://fluentbit.io), ships them to [Dynatrace](https://www.dynatrace.com) through the Log Ingest API, and serves them back to the OpenChoreo Observer from [Grail](https://docs.dynatrace.com/docs/platform/grail) with DQL.
 

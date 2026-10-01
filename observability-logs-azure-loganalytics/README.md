@@ -1,5 +1,7 @@
 # Observability Logs Module for Azure Log Analytics
 
+[![Codecov](https://codecov.io/gh/openchoreo/community-modules/branch/main/graph/badge.svg?flag=observability-logs-azure-loganalytics)](https://app.codecov.io/gh/openchoreo/community-modules?flags%5B0%5D=observability-logs-azure-loganalytics)
+
 This module exposes Azure Log Analytics as an OpenChoreo logs backend. It
 queries `ContainerLogV2` (populated by the Azure Monitor Agent through the
 AKS Container Insights addon) and manages alert rules via Azure Monitor
@@ -17,10 +19,11 @@ federated to the adapter's ServiceAccount.
 4. [Azure role assignments](#azure-role-assignments)
 5. [Installation on AKS](#installation-on-aks)
 6. [Log alerting](#log-alerting)
-7. [Shared webhook secret](#shared-webhook-secret)
-8. [Troubleshooting](#troubleshooting)
-9. [Configuration reference](#configuration-reference)
-10. [Compatibility](#compatibility)
+7. [Platform logs](#platform-logs)
+8. [Shared webhook secret](#shared-webhook-secret)
+9. [Troubleshooting](#troubleshooting)
+10. [Configuration reference](#configuration-reference)
+11. [Compatibility](#compatibility)
 
 ## Architecture
 
@@ -50,26 +53,28 @@ metadata through `KubernetesMetadata.podLabels`:
   `openchoreo.dev/component-uid`, `openchoreo.dev/project-uid`,
   `openchoreo.dev/environment-uid`)
 
-| Endpoint | Purpose |
-| --- | --- |
-| `POST /api/v1/logs/query` | Runs a KQL query against `ContainerLogV2`, scoped by OpenChoreo namespace label plus optional component/project/environment UIDs. |
-| `POST /api/v1alpha1/alerts/rules` | Creates an Azure Monitor scheduled query rule wired to the configured Action Group. |
-| `GET /api/v1alpha1/alerts/rules/{ruleName}` | Looks the rule up by its `openchoreo-rule-name` tag. |
-| `PUT /api/v1alpha1/alerts/rules/{ruleName}` | Updates the rule (CreateOrUpdate semantics). |
-| `DELETE /api/v1alpha1/alerts/rules/{ruleName}` | Deletes the rule. |
-| `POST /api/v1alpha1/alerts/webhook` | Receives Common Alert Schema payloads from the Action Group and forwards a normalised alert to the Observer. |
-| `GET /health` | Readiness/liveness check. |
+| Endpoint                                         | Purpose                                                                                                                           |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/v1/logs/query`                        | Runs a KQL query against `ContainerLogV2`, scoped by OpenChoreo namespace label plus optional component/project/environment UIDs. |
+| `POST /api/v1alpha1/platform-logs/query`         | Queries any pod log the observability plane collects, by raw Kubernetes coordinates. See [Platform logs](#platform-logs).         |
+| `POST /api/v1alpha1/platform-logs/filter-values` | Lists the distinct values one platform-logs filter can take, to drive the filter pickers.                                         |
+| `POST /api/v1alpha1/alerts/rules`                | Creates an Azure Monitor scheduled query rule wired to the configured Action Group.                                               |
+| `GET /api/v1alpha1/alerts/rules/{ruleName}`      | Looks the rule up by its `openchoreo-rule-name` tag.                                                                              |
+| `PUT /api/v1alpha1/alerts/rules/{ruleName}`      | Updates the rule (CreateOrUpdate semantics).                                                                                      |
+| `DELETE /api/v1alpha1/alerts/rules/{ruleName}`   | Deletes the rule.                                                                                                                 |
+| `POST /api/v1alpha1/alerts/webhook`              | Receives Common Alert Schema payloads from the Action Group and forwards a normalised alert to the Observer.                      |
+| `GET /health`                                    | Readiness/liveness check.                                                                                                         |
 
 ## Choose a deployment topology
 
 Choose the deployment topology first, then choose the workload identity
 model.
 
-| Topology | Install location | Purpose | Required Helm values |
-| --- | --- | --- | --- |
-| Single cluster | The OpenChoreo cluster where the observability plane and workloads run together. | Deploys the adapter that queries the shared Log Analytics workspace and manages alert rules. | Defaults. |
-| Observability plane cluster | The cluster where the OpenChoreo observability plane is installed. | Deploys only the adapter. | Defaults. |
-| Data-plane / workflow-plane cluster | Each cluster that runs OpenChoreo workloads. | No install. Workload clusters write to Log Analytics via the AKS Container Insights addon directly. | N/A |
+| Topology                                            | Install location                                                                 | Purpose                                                                                             | Required Helm values |
+| --------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------- |
+| Single cluster                                      | The OpenChoreo cluster where the observability plane and workloads run together. | Deploys the adapter that queries the shared Log Analytics workspace and manages alert rules.        | Defaults.            |
+| Observability plane cluster                         | The cluster where the OpenChoreo observability plane is installed.               | Deploys only the adapter.                                                                           | Defaults.            |
+| Data-plane / workflow-plane / control-plane cluster | Each cluster that runs OpenChoreo user workloads or system workloads.            | No install. Workload clusters write to Log Analytics via the AKS Container Insights addon directly. | N/A                  |
 
 Log Analytics is the shared managed backend. Remote workload clusters
 write to the same workspace via Container Insights and do not need
@@ -178,6 +183,11 @@ data:
 EOF
 ```
 
+This ConfigMap is also what makes [platform logs](#platform-logs) work:
+plane attribution is read out of `KubernetesMetadata.podLabels`, so
+`metadata_collection` is required for it, and nothing further needs to be
+configured on the agent.
+
 The Azure Monitor Agent pods in `kube-system` pick up the change within
 a few minutes and restart; confirm with:
 
@@ -218,11 +228,11 @@ UAMI_CLIENT_ID=$(az identity show \
 The adapter needs three role assignments on the User-Assigned Managed
 Identity it runs as:
 
-| Scope | Role | Why |
-| --- | --- | --- |
-| Log Analytics workspace | **Log Analytics Reader** | Run KQL queries against `ContainerLogV2`. |
+| Scope                            | Role                       | Why                                                     |
+| -------------------------------- | -------------------------- | ------------------------------------------------------- |
+| Log Analytics workspace          | **Log Analytics Reader**   | Run KQL queries against `ContainerLogV2`.               |
 | Resource group holding the rules | **Monitoring Contributor** | Create, update, delete, and list `scheduledQueryRules`. |
-| Action Group | **Reader** | Boot-time `verifyActionGroup` reachability check. |
+| Action Group                     | **Reader**                 | Boot-time `verifyActionGroup` reachability check.       |
 
 Federate the UAMI to the adapter's ServiceAccount once the chart is
 installed:
@@ -329,6 +339,100 @@ the shared secret has to reach the adapter another way. Two options:
   App that holds the secret and forwards requests with it set as a
   header. The Action Group points at the Logic App; the Logic App points
   at the adapter.
+
+## Platform logs
+
+These two endpoints back `GET /api/v1alpha1/platform-logs` on the
+Observer, which returns pod logs addressed by **raw Kubernetes
+coordinates** — cluster, namespace, pod, container, pod label — across
+everything the observability plane collects. That is OpenChoreo's own
+components, the charts OpenChoreo depends on but does not ship
+(cert-manager, external-secrets, OpenBao, Thunder,...), and user workloads
+alike.
+
+Platform logs are not a different set of records from `POST /api/v1/logs/query`,
+and not a different store — both read `ContainerLogV2`. Two things differ:
+
+- **How a record is addressed.** `/api/v1/logs/query` takes a project,
+  component and environment, and resolves them to the pod labels
+  OpenChoreo stamps on workload pods. Platform logs take the Kubernetes
+  coordinates directly, so they can reach pods carrying no OpenChoreo
+  identity at all — which is the only way to see the platform itself, or
+  anything installed alongside it.
+- **Who may ask.** `/api/v1/logs/query` is ownership-checked against the
+  project named in the query. Platform logs are authorized once, cluster
+  wide, by `platformlogs:view`. That is an operator's view rather than a
+  tenant's, which is what lets one query span every namespace.
+
+Because the records are not separated by store, `platformlogs:view` also
+reads user workload logs. It is a cluster-wide grant and should be
+treated as one.
+
+The Observer settles both of those before a query reaches this adapter;
+the adapter's job is the translation to KQL and back.
+
+**Cluster identity.** `ContainerLogV2._ResourceId` holds the AKS cluster's
+ARM resource ID, and the `clusterInstance` filter matches its last path
+segment — the cluster's resource name. This matters because remote
+workload clusters all write to the same workspace (see [Choose a
+deployment topology](#choose-a-deployment-topology)), so their records
+would otherwise be indistinguishable. Azure writes `_ResourceId` itself,
+so unlike a chart value it cannot be misconfigured, left at a default or
+forged. Two consequences worth knowing:
+
+- Azure lower-cases `_ResourceId`, so cluster names come back lower-case.
+  The filter compares case-insensitively, so either spelling matches.
+- Two clusters with the same resource name in different resource groups
+  would collide. Name them distinctly if you run that topology.
+
+**`kube-system` is excluded.** The Azure Monitor Agent excludes
+`kube-system` and `gatekeeper-system` from container log collection by
+default: CoreDNS, kube-proxy, the CNI and the API server sit a
+layer below OpenChoreo, static pods cannot be labelled, and managed
+providers reconcile those namespaces anyway.
+
+That is a collection default, not an API boundary. An operator who enables
+`collect_system_pod_logs` for a system container will find those records
+returned by platform-logs queries like any others; nothing here prevents
+it. It is simply outside the coverage OpenChoreo takes responsibility
+for.
+
+### Plane attribution
+
+Which plane a record belongs to is carried on pod labels, set by the Helm
+chart that creates the pod, and filtered through the `labels` field:
+
+| Label                     | Value                                                                               |
+| ------------------------- | ----------------------------------------------------------------------------------- |
+| `openchoreo.dev/plane`    | `controlplane`, `dataplane`, `workflowplane` or `observabilityplane`                |
+| `openchoreo.dev/plane-id` | the install's `planeID`, on every plane but the control plane, which is a singleton |
+
+Components OpenChoreo depends on but does not ship — cert-manager,
+external-secrets, OpenBao, Thunder, etc. — carry no `openchoreo.dev/plane`
+label, so they are reached by namespace or by their own labels rather
+than by plane. User workload pods carry no plane label either; they carry
+the OpenChoreo identity labels that `POST /api/v1/logs/query` resolves.
+So a plane filter is what narrows a query to the platform — the absence
+of one is not a restriction, it is the whole cluster.
+
+Log Analytics stores pod labels as JSON with their keys untouched, so a
+key comes back spelled exactly as Kubernetes spells it and can be sent
+straight back as a filter. A malformed label key is rejected with a `400`
+rather than silently dropped, because dropping a filter widens the query.
+
+### Fields not returned
+
+`podIp` is always absent. `ContainerLogV2` has no pod-IP column and
+`KubernetesMetadata` does not carry one, so there is nothing to report.
+It is optional in the adapter contract.
+
+`containerImage` is reassembled from three metadata fields, because the
+agent stores an image split across them: `ghcr.io/openchoreo/controller:1.3.0`
+arrives as `imageRepo` = `ghcr.io`, `image` = `openchoreo/controller` and
+`imageTag` = `1.3.0`. If an operator narrows `include_fields` and drops
+`imageRepo` or `imageTag`, the value degrades to whichever parts were
+collected rather than failing — so keep all four image fields in the
+ConfigMap if you want the full reference the other backends return.
 
 ## Shared webhook secret
 
@@ -446,42 +550,75 @@ what you expect. If the AMA's `metadata_collection` is not configured
 to capture pod labels, the UID filters (`openchoreo.dev/*`) will not
 match either; re-check the `container-azm-ms-agentconfig` ConfigMap.
 
+### Platform logs return records but every plane filter is empty
+
+Records arrive because `ContainerLogV2` is populated regardless, but the
+`labels` filter reads `KubernetesMetadata.podLabels`, which only exists
+when `metadata_collection` is enabled. Confirm the column is present:
+
+```kusto
+ContainerLogV2
+| where isnotempty(KubernetesMetadata)
+| take 1
+```
+
+If that returns nothing, re-apply the `container-azm-ms-agentconfig`
+ConfigMap from [Azure prerequisites](#azure-prerequisites) and wait for
+the agent pods to restart. The column appears on newly ingested records
+only — records already in the workspace do not gain it retroactively.
+
+A plane whose pods carry no `openchoreo.dev/plane` label at all is a
+different fault: the label comes from the plane's own Helm chart, not
+from this module, so check the chart version deployed on that cluster.
+
+### Platform logs from two clusters look like one cluster
+
+The `clusterInstance` filter derives from `_ResourceId`'s last path
+segment, so two AKS clusters sharing a resource name in different
+resource groups are indistinguishable. Confirm what the workspace
+actually holds:
+
+```kusto
+ContainerLogV2
+| summarize count() by _ResourceId
+```
+
 ## Configuration reference
 
-| Value | Default | Description |
-| --- | --- | --- |
-| `azure.subscriptionId` | Required | Subscription that hosts the scheduled query rules and Action Group. |
-| `azure.resourceGroup` | Required | Resource group that holds the scheduled query rules. |
-| `azure.region` | Required | Azure region for newly created rules. Must match the workspace region. |
-| `logAnalytics.workspaceId` | Required | Workspace `customerId` (GUID), not the ARM ID. Used for the `/query` API. |
-| `logAnalytics.workspaceResourceId` | Required | Full ARM ID of the Log Analytics workspace. Used as the rule scope. |
-| `actionGroup.id` | Required | ARM ID of a pre-existing Action Group with a webhook receiver pointed at the adapter. |
-| `adapter.enabled` | `true` | Toggle the adapter Deployment. |
-| `adapter.replicas` | `1` | Adapter replica count. |
-| `adapter.image.repository` | `ghcr.io/openchoreo/observability-logs-azure-loganalytics-adapter` | Adapter container image. |
-| `adapter.image.tag` | Chart `appVersion` | Image tag. |
-| `adapter.service.port` | `8080` | HTTP listener port. |
-| `adapter.observerUrl` | `http://observer-internal.openchoreo-observability-plane.svc.cluster.local:8081` | Observer base URL. Fired alerts are forwarded to `${observerUrl}/api/v1alpha1/alerts/webhook`. The alert-webhook endpoint lives on the Observer's internal service (`observer-internal:8081`), not the public `:8080`. |
-| `adapter.queryTimeoutSeconds` | `30` | Upper bound for a single Log Analytics query. |
-| `adapter.logLevel` | `INFO` | `DEBUG` \| `INFO` \| `WARN` \| `ERROR`. |
-| `adapter.alertRuleDefaults.evaluationFrequency` | `PT5M` | ISO 8601 duration used when an alert rule request omits one. |
-| `adapter.alertRuleDefaults.windowSize` | `PT5M` | ISO 8601 duration used when an alert rule request omits one. |
-| `adapter.serviceAccount.annotations` | `{}` | Annotations applied to the adapter ServiceAccount. Use `azure.workload.identity/client-id: <uami-client-id>` to bind a Managed Identity. |
-| `adapter.webhookAuth.enabled` | `true` | Reject webhook calls without the shared secret. |
-| `adapter.webhookAuth.sharedSecret` | `""` | Inline secret value. Chart creates a Secret; min 16 characters. |
-| `adapter.webhookAuth.sharedSecretRef.name` | `""` | Reference an existing Secret instead of supplying the value inline. |
-| `adapter.webhookAuth.sharedSecretRef.key` | `token` | Key inside the referenced Secret. |
-| `adapter.webhookRoute.enabled` | `false` | Render a Gateway API HTTPRoute exposing only `/api/v1alpha1/alerts/webhook`. |
-| `adapter.webhookRoute.parentRef.name` | `gateway-default` | Gateway to attach to. |
-| `adapter.webhookRoute.parentRef.namespace` | `""` | Gateway namespace; defaults to the release namespace. |
-| `adapter.webhookRoute.parentRef.sectionName` | `""` | Optional Gateway listener name. |
-| `adapter.webhookRoute.hostnames` | `[]` | Optional hostnames matched at the route level. |
-| `adapter.networkPolicy.enabled` | `false` | Render a NetworkPolicy restricting ingress to the adapter Pod. |
-| `adapter.networkPolicy.observerNamespaceLabels` | `{kubernetes.io/metadata.name: openchoreo-observability-plane}` | Namespace labels selecting the Observer's namespace. |
-| `adapter.networkPolicy.observerPodLabels` | `{}` | Pod labels selecting the Observer Pod. Required when the policy is enabled. |
-| `adapter.networkPolicy.gatewayNamespaceLabels` | `{}` | Namespace labels selecting the Gateway data-plane that proxies the webhook. |
-| `adapter.networkPolicy.allowProbeIPBlock` | `""` | Optional CIDR allowed through ingress for liveness/readiness probes. |
-| `adapter.resources` | `200m/256Mi limits, 50m/128Mi requests` | Standard resource requests/limits. |
+| Value                                           | Default                                                                          | Description                                                                                                                                                                                                            |
+| ----------------------------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `azure.subscriptionId`                          | Required                                                                         | Subscription that hosts the scheduled query rules and Action Group.                                                                                                                                                    |
+| `azure.resourceGroup`                           | Required                                                                         | Resource group that holds the scheduled query rules.                                                                                                                                                                   |
+| `azure.region`                                  | Required                                                                         | Azure region for newly created rules. Must match the workspace region.                                                                                                                                                 |
+| `logAnalytics.workspaceId`                      | Required                                                                         | Workspace `customerId` (GUID), not the ARM ID. Used for the `/query` API.                                                                                                                                              |
+| `logAnalytics.workspaceResourceId`              | Required                                                                         | Full ARM ID of the Log Analytics workspace. Used as the rule scope.                                                                                                                                                    |
+| `actionGroup.id`                                | Required                                                                         | ARM ID of a pre-existing Action Group with a webhook receiver pointed at the adapter.                                                                                                                                  |
+| `adapter.enabled`                               | `true`                                                                           | Toggle the adapter Deployment.                                                                                                                                                                                         |
+| `adapter.replicas`                              | `1`                                                                              | Adapter replica count.                                                                                                                                                                                                 |
+| `adapter.image.repository`                      | `ghcr.io/openchoreo/observability-logs-azure-loganalytics-adapter`               | Adapter container image.                                                                                                                                                                                               |
+| `adapter.image.tag`                             | Chart `appVersion`                                                               | Image tag.                                                                                                                                                                                                             |
+| `adapter.service.port`                          | `8080`                                                                           | HTTP listener port.                                                                                                                                                                                                    |
+| `adapter.observerUrl`                           | `http://observer-internal.openchoreo-observability-plane.svc.cluster.local:8081` | Observer base URL. Fired alerts are forwarded to `${observerUrl}/api/v1alpha1/alerts/webhook`. The alert-webhook endpoint lives on the Observer's internal service (`observer-internal:8081`), not the public `:8080`. |
+| `adapter.queryTimeoutSeconds`                   | `30`                                                                             | Upper bound for a single Log Analytics query.                                                                                                                                                                          |
+| `adapter.logLevel`                              | `INFO`                                                                           | `DEBUG` \| `INFO` \| `WARN` \| `ERROR`.                                                                                                                                                                                |
+| `adapter.alertRuleDefaults.evaluationFrequency` | `PT5M`                                                                           | ISO 8601 duration used when an alert rule request omits one.                                                                                                                                                           |
+| `adapter.alertRuleDefaults.windowSize`          | `PT5M`                                                                           | ISO 8601 duration used when an alert rule request omits one.                                                                                                                                                           |
+| `adapter.serviceAccount.annotations`            | `{}`                                                                             | Annotations applied to the adapter ServiceAccount. Use `azure.workload.identity/client-id: <uami-client-id>` to bind a Managed Identity.                                                                               |
+| `adapter.webhookAuth.enabled`                   | `true`                                                                           | Reject webhook calls without the shared secret.                                                                                                                                                                        |
+| `adapter.webhookAuth.sharedSecret`              | `""`                                                                             | Inline secret value. Chart creates a Secret; min 16 characters.                                                                                                                                                        |
+| `adapter.webhookAuth.sharedSecretRef.name`      | `""`                                                                             | Reference an existing Secret instead of supplying the value inline.                                                                                                                                                    |
+| `adapter.webhookAuth.sharedSecretRef.key`       | `token`                                                                          | Key inside the referenced Secret.                                                                                                                                                                                      |
+| `adapter.webhookRoute.enabled`                  | `false`                                                                          | Render a Gateway API HTTPRoute exposing only `/api/v1alpha1/alerts/webhook`.                                                                                                                                           |
+| `adapter.webhookRoute.parentRef.name`           | `gateway-default`                                                                | Gateway to attach to.                                                                                                                                                                                                  |
+| `adapter.webhookRoute.parentRef.namespace`      | `""`                                                                             | Gateway namespace; defaults to the release namespace.                                                                                                                                                                  |
+| `adapter.webhookRoute.parentRef.sectionName`    | `""`                                                                             | Optional Gateway listener name.                                                                                                                                                                                        |
+| `adapter.webhookRoute.hostnames`                | `[]`                                                                             | Optional hostnames matched at the route level.                                                                                                                                                                         |
+| `adapter.networkPolicy.enabled`                 | `false`                                                                          | Render a NetworkPolicy restricting ingress to the adapter Pod.                                                                                                                                                         |
+| `adapter.networkPolicy.observerNamespaceLabels` | `{kubernetes.io/metadata.name: openchoreo-observability-plane}`                  | Namespace labels selecting the Observer's namespace.                                                                                                                                                                   |
+| `adapter.networkPolicy.observerPodLabels`       | `{}`                                                                             | Pod labels selecting the Observer Pod. Required when the policy is enabled.                                                                                                                                            |
+| `adapter.networkPolicy.gatewayNamespaceLabels`  | `{}`                                                                             | Namespace labels selecting the Gateway data-plane that proxies the webhook.                                                                                                                                            |
+| `adapter.networkPolicy.allowProbeIPBlock`       | `""`                                                                             | Optional CIDR allowed through ingress for liveness/readiness probes.                                                                                                                                                   |
+| `adapter.resources`                             | `200m/256Mi limits, 50m/128Mi requests`                                          | Standard resource requests/limits.                                                                                                                                                                                     |
 
 ## Compatibility
 
@@ -491,6 +628,6 @@ match either; re-check the `container-azm-ms-agentconfig` ConfigMap.
 > below to determine the appropriate module version for your OpenChoreo
 > installation.
 
-| Module Version | OpenChoreo Version |
-|----------------|--------------------|
-| v0.1.x         | v1.1.x             |
+| OpenChoreo Version | Module Version |
+| ------------------ | -------------- |
+| v1.1.x             | 0.1.x          |
