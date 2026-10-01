@@ -36,6 +36,10 @@ component_management:
       name: observability-logs-aws-cloudwatch
       paths:
         - observability-logs-aws-cloudwatch/**
+    - component_id: observability_logs_dynatrace
+      name: observability-logs-dynatrace
+      paths:
+        - observability-logs-dynatrace/**
     - component_id: observability_logs_gcp_cloudlogging
       name: observability-logs-gcp-cloudlogging
       paths:
