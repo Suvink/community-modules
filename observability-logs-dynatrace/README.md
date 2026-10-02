@@ -1,7 +1,5 @@
 # Observability Logs Module for Dynatrace
 
-[![Codecov](https://codecov.io/gh/openchoreo/community-modules/branch/main/graph/badge.svg?flag=observability-logs-dynatrace)](https://app.codecov.io/gh/openchoreo/community-modules?flags%5B0%5D=observability-logs-dynatrace)
-
 This module collects container logs using [Fluent Bit](https://fluentbit.io), ships them to [Dynatrace](https://www.dynatrace.com) through the Log Ingest API, and serves them back to the OpenChoreo Observer from [Grail](https://docs.dynatrace.com/docs/platform/grail) with DQL.
 
 It has two parts:
@@ -267,34 +265,35 @@ Check the events collector logs for `Exporting failed`. Its endpoint must be `ht
 
 ## Configuration reference
 
-| Value                                     | Default                                                   | Description                                                                                              |
-| ----------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `dynatrace.platformUrl`                   | Required                                                  | Grail API base URL, `https://<env-id>.apps.dynatrace.com`. Required when `adapter.enabled=true`.         |
-| `dynatrace.ingestUrl`                     | Derived from `platformUrl`                                | Log ingest base URL. Set it to ship through an ActiveGate, or on clusters that run only Fluent Bit.      |
-| `dynatrace.ingest.authScheme`             | `Api-Token`                                               | `Api-Token` for an access token, `Bearer` for a platform or OAuth token with `openpipeline:logs:ingest`. |
-| `dynatrace.ingest.tlsVerify`              | `true`                                                    | Verify the ingest endpoint's TLS certificate.                                                            |
-| `dynatrace.containerLogsSource`           | `openchoreo-container-logs`                               | `log.source` stamped on container logs. Must match on every cluster reporting to one environment.        |
-| `dynatrace.auditLogsSource`               | `openchoreo-audit-logs`                                   | `log.source` stamped on audit records. Must differ from `containerLogsSource`.                           |
-| `dynatrace.credentials.name`              | `dynatrace-credentials`                                   | Secret holding the Dynatrace credentials, in the release namespace.                                      |
-| `dynatrace.credentials.create`            | `false`                                                   | Have the chart create the Secret from the inline values below. For trials only.                          |
-| `auditLogs.enabled`                       | `false`                                                   | Route audit records to their own `log.source`.                                                           |
-| `auditLogs.producers`                     | `openchoreo-api`, `observer`                              | The trusted-producer allowlist. See [Trusted producers](#trusted-producers).                             |
-| `auditLogs.bucket`                        | `""`                                                      | Grail bucket the adapter reads audit records from. Empty reads every bucket the token can see.           |
-| `fluent-bit.enabled`                      | `true`                                                    | Toggle the Fluent Bit DaemonSet.                                                                         |
-| `fluentBitCustomizations.clusterInstance` | Required                                                  | Cluster name stamped on every record as `k8s.cluster.name`. Required when Fluent Bit is enabled.         |
-| `fluentBitCustomizations.excludePaths`    | `/var/log/containers/*_kube-system_*.log`                 | Container log files that are not shipped. Fluent Bit's own logs are always excluded.                     |
-| `fluentBitCustomizations.readFromHead`    | `true`                                                    | Read container log files from the beginning on first start.                                              |
-| `adapter.enabled`                         | `true`                                                    | Toggle the adapter Deployment.                                                                           |
-| `adapter.authMode`                        | `platformToken`                                           | `platformToken` or `oauth`.                                                                              |
-| `adapter.oauth.tokenUrl`                  | `https://sso.dynatrace.com/sso/oauth2/token`              | OAuth token endpoint, when `authMode=oauth`.                                                             |
-| `adapter.oauth.scope`                     | `storage:logs:read storage:buckets:read`                  | OAuth scopes requested.                                                                                  |
-| `adapter.oauth.resource`                  | `""`                                                      | Optional resource URN, e.g. `urn:dtaccount:<account-uuid>`.                                              |
-| `adapter.queryTimeout`                    | `30s`                                                     | Upper bound for one Grail query, including polling.                                                      |
-| `adapter.logLevel`                        | `info`                                                    | `debug`, `info`, `warn` or `error`.                                                                      |
-| `adapter.image.repository`                | `ghcr.io/openchoreo/observability-logs-dynatrace-adapter` | Adapter container image.                                                                                 |
-| `adapter.image.tag`                       | Chart `appVersion`                                        | Image tag.                                                                                               |
-| `adapter.image.pullPolicy`                | `IfNotPresent`                                            | Image pull policy.                                                                                       |
-| `adapter.resources`                       | `200m/256Mi` limits, `50m/128Mi` requests                 | Adapter resource requests and limits.                                                                    |
+| Value                                     | Default                                                   | Description                                                                                                                                        |
+| ----------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dynatrace.platformUrl`                   | Required                                                  | Grail API base URL, `https://<env-id>.apps.dynatrace.com`. Required when `adapter.enabled=true`.                                                   |
+| `dynatrace.ingestUrl`                     | Derived from `platformUrl`                                | Log ingest base URL. Set it to ship through an ActiveGate, or on clusters that run only Fluent Bit.                                                |
+| `dynatrace.ingest.authScheme`             | `Api-Token`                                               | `Api-Token` for an access token, `Bearer` for a platform or OAuth token with `openpipeline:logs:ingest`.                                           |
+| `dynatrace.ingest.tlsVerify`              | `true`                                                    | Verify the ingest endpoint's TLS certificate.                                                                                                      |
+| `dynatrace.containerLogsSource`           | `openchoreo-container-logs`                               | `log.source` stamped on container logs. Must match on every cluster reporting to one environment.                                                  |
+| `dynatrace.auditLogsSource`               | `openchoreo-audit-logs`                                   | `log.source` stamped on audit records. Must differ from `containerLogsSource`.                                                                     |
+| `dynatrace.credentials.name`              | `dynatrace-credentials`                                   | Secret holding the Dynatrace credentials, in the release namespace.                                                                                |
+| `dynatrace.credentials.create`            | `false`                                                   | Have the chart create the Secret from the inline values below. For trials only.                                                                    |
+| `auditLogs.enabled`                       | `false`                                                   | Route audit records to their own `log.source`.                                                                                                     |
+| `auditLogs.producers`                     | `openchoreo-api`, `observer`                              | The trusted-producer allowlist. See [Trusted producers](#trusted-producers).                                                                       |
+| `auditLogs.bucket`                        | `""`                                                      | Grail bucket the adapter reads audit records from. Empty reads every bucket the token can see.                                                     |
+| `fluent-bit.enabled`                      | `true`                                                    | Toggle the Fluent Bit DaemonSet.                                                                                                                   |
+| `fluentBitCustomizations.clusterInstance` | Required                                                  | Cluster name stamped on every record as `k8s.cluster.name`. Required when Fluent Bit is enabled.                                                   |
+| `fluentBitCustomizations.excludePaths`    | `/var/log/containers/*_kube-system_*.log`                 | Container log files that are not shipped. Fluent Bit's own logs are always excluded.                                                               |
+| `fluentBitCustomizations.readFromHead`    | `true`                                                    | Read container log files from the beginning on first start.                                                                                        |
+| `adapter.enabled`                         | `true`                                                    | Toggle the adapter Deployment.                                                                                                                     |
+| `adapter.authMode`                        | `platformToken`                                           | `platformToken` or `oauth`.                                                                                                                        |
+| `adapter.oauth.tokenUrl`                  | `https://sso.dynatrace.com/sso/oauth2/token`              | OAuth token endpoint, when `authMode=oauth`.                                                                                                       |
+| `adapter.oauth.scope`                     | `storage:logs:read storage:buckets:read`                  | OAuth scopes requested.                                                                                                                            |
+| `adapter.oauth.resource`                  | `""`                                                      | Optional resource URN, e.g. `urn:dtaccount:<account-uuid>`.                                                                                        |
+| `adapter.queryTimeout`                    | `30s`                                                     | Upper bound for one Grail query, including polling.                                                                                                |
+| `adapter.allowInsecureHttp`               | `false`                                                   | Accept `http://` for `dynatrace.platformUrl` and `adapter.oauth.tokenUrl`. Credentials then travel in cleartext, so use it only for a test double. |
+| `adapter.logLevel`                        | `info`                                                    | `debug`, `info`, `warn` or `error`.                                                                                                                |
+| `adapter.image.repository`                | `ghcr.io/openchoreo/observability-logs-dynatrace-adapter` | Adapter container image.                                                                                                                           |
+| `adapter.image.tag`                       | Chart `appVersion`                                        | Image tag.                                                                                                                                         |
+| `adapter.image.pullPolicy`                | `IfNotPresent`                                            | Image pull policy.                                                                                                                                 |
+| `adapter.resources`                       | `200m/256Mi` limits, `50m/128Mi` requests                 | Adapter resource requests and limits.                                                                                                              |
 
 ## Dependencies
 

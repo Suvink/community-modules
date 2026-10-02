@@ -62,8 +62,8 @@ func (h *LogsHandler) QueryLogs(ctx context.Context, request gen.QueryLogsReques
 	// A WorkflowSearchScope is identified by having a workflowRunName field.
 	workflowScope, err := body.SearchScope.AsWorkflowSearchScope()
 	if err == nil && workflowScope.WorkflowRunName != nil {
-		if strings.TrimSpace(workflowScope.Namespace) == "" {
-			return gen.QueryLogs400JSONResponse{Title: ptr(gen.BadRequest), Message: ptr("searchScope with a valid namespace is required")}, nil
+		if strings.TrimSpace(workflowScope.Namespace) == "" || strings.TrimSpace(*workflowScope.WorkflowRunName) == "" {
+			return gen.QueryLogs400JSONResponse{Title: ptr(gen.BadRequest), Message: ptr("searchScope with a valid namespace and workflowRunName is required")}, nil
 		}
 
 		params := dynatrace.WorkflowLogsParams{

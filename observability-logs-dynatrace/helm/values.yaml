@@ -177,6 +177,10 @@ adapter:
   # Upper bound for one Grail query, including polling.
   queryTimeout: "30s"
 
+  # Accept http:// for dynatrace.platformUrl and adapter.oauth.tokenUrl. The adapter sends
+  # its credentials to both, so leave this off outside of a test double.
+  allowInsecureHttp: false
+
   logLevel: "info"
 
   image:

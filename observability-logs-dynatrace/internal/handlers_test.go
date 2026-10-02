@@ -115,7 +115,15 @@ func (f *fakeBackend) GetAuditLogFilterValues(_ context.Context, p dynatrace.Aud
 func newTestServer(t *testing.T, backend *fakeBackend) http.Handler {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewServer("0", NewLogsHandler(backend, logger), logger).Handler()
+	return NewServer("0", 30*time.Second, NewLogsHandler(backend, logger), logger).Handler()
+}
+
+func TestWriteTimeoutCoversSequentialQueries(t *testing.T) {
+	for _, q := range []time.Duration{30 * time.Second, 2 * time.Minute} {
+		if got := NewServer("0", q, nil, nil).httpServer.WriteTimeout; got <= 2*q {
+			t.Errorf("query timeout %s: write timeout %s does not cover two queries", q, got)
+		}
+	}
 }
 
 func do(t *testing.T, h http.Handler, method, path, body string) (int, map[string]any) {
@@ -176,6 +184,7 @@ func TestQueryLogsBadRequests(t *testing.T) {
 	for name, body := range map[string]string{
 		"no namespace":          `{` + window + `,"searchScope":{"namespace":""}}`,
 		"workflow no namespace": `{` + window + `,"searchScope":{"namespace":" ","workflowRunName":"r"}}`,
+		"workflow no run":       `{` + window + `,"searchScope":{"namespace":"d","workflowRunName":" "}}`,
 		"inverted window":       `{"startTime":"2026-01-01T01:00:00Z","endTime":"2026-01-01T00:00:00Z","searchScope":{"namespace":"d"}}`,
 	} {
 		if code, _ := do(t, h, http.MethodPost, "/api/v1/logs/query", body); code != http.StatusBadRequest {
@@ -268,6 +277,10 @@ func TestQueryPlatformLogs(t *testing.T) {
 	if code, _ := do(t, h, http.MethodPost, "/api/v1alpha1/platform-logs/query", `{`+window+`,"labels":{"a=b":"x"}}`); code != http.StatusBadRequest {
 		t.Errorf("invalid label key: status %d", code)
 	}
+	if code, _ := do(t, h, http.MethodPost, "/api/v1alpha1/platform-logs/query",
+		`{"startTime":"2026-01-01T01:00:00Z","endTime":"2026-01-01T00:00:00Z"}`); code != http.StatusBadRequest {
+		t.Errorf("inverted window: status %d", code)
+	}
 }
 
 func TestQueryPlatformLogFilterValues(t *testing.T) {
@@ -286,6 +299,10 @@ func TestQueryPlatformLogFilterValues(t *testing.T) {
 	}
 	if body["filter"] != "namespace" {
 		t.Errorf("filter not echoed: %v", body)
+	}
+	if code, _ := do(t, h, http.MethodPost, "/api/v1alpha1/platform-logs/filter-values",
+		`{"query":{"startTime":"2026-01-01T01:00:00Z","endTime":"2026-01-01T00:00:00Z"},"filter":"namespace"}`); code != http.StatusBadRequest {
+		t.Errorf("inverted window: status %d", code)
 	}
 }
 

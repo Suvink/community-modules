@@ -20,20 +20,25 @@ type Server struct {
 	logger     *slog.Logger
 }
 
+// writeTimeout bounds a response by the slowest request path: events run the page and count
+// queries in parallel and then the tie extension, so two query timeouts back to back, plus a
+// margin for encoding and the network.
+func writeTimeout(queryTimeout time.Duration) time.Duration {
+	return 2*queryTimeout + 15*time.Second
+}
+
 // NewServer wires the handler into the generated router.
-func NewServer(port string, logsHandler *LogsHandler, logger *slog.Logger) *Server {
+func NewServer(port string, queryTimeout time.Duration, logsHandler *LogsHandler, logger *slog.Logger) *Server {
 	strictHandler := gen.NewStrictHandler(logsHandler, nil)
 
 	mux := http.NewServeMux()
 	handler := gen.HandlerFromMux(strictHandler, mux)
 
 	httpServer := &http.Server{
-		Addr:        ":" + port,
-		Handler:     handler,
-		ReadTimeout: 15 * time.Second,
-		// Longer than the other adapters: a Grail query over a wide window can take a
-		// while, and the page, count and timeline queries all have to finish.
-		WriteTimeout: 60 * time.Second,
+		Addr:         ":" + port,
+		Handler:      handler,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: writeTimeout(queryTimeout),
 		IdleTimeout:  60 * time.Second,
 	}
 

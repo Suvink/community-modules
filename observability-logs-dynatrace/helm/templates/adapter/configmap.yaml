@@ -15,6 +15,7 @@ data:
   DT_PLATFORM_URL: {{ trimSuffix "/" .Values.dynatrace.platformUrl | quote }}
   DT_AUTH_MODE: {{ .Values.adapter.authMode | quote }}
   DT_QUERY_TIMEOUT: {{ .Values.adapter.queryTimeout | quote }}
+  DT_ALLOW_INSECURE_HTTP: {{ .Values.adapter.allowInsecureHttp | quote }}
   DT_CONTAINER_LOGS_SOURCE: {{ .Values.dynatrace.containerLogsSource | quote }}
   DT_AUDIT_LOGS_SOURCE: {{ .Values.dynatrace.auditLogsSource | quote }}
   DT_AUDIT_BUCKET: {{ .Values.auditLogs.bucket | quote }}

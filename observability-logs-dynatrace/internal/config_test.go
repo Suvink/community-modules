@@ -14,7 +14,7 @@ func setEnv(t *testing.T, env map[string]string) {
 	for _, k := range []string{
 		"SERVER_PORT", "LOG_LEVEL", "DT_PLATFORM_URL", "DT_AUTH_MODE", "DT_PLATFORM_TOKEN", "DT_QUERY_TIMEOUT",
 		"DT_OAUTH_CLIENT_ID", "DT_OAUTH_CLIENT_SECRET", "DT_OAUTH_TOKEN_URL", "DT_OAUTH_SCOPE", "DT_OAUTH_RESOURCE",
-		"DT_CONTAINER_LOGS_SOURCE", "DT_AUDIT_LOGS_SOURCE", "DT_AUDIT_BUCKET",
+		"DT_CONTAINER_LOGS_SOURCE", "DT_AUDIT_LOGS_SOURCE", "DT_AUDIT_BUCKET", "DT_ALLOW_INSECURE_HTTP",
 	} {
 		t.Setenv(k, "")
 	}
@@ -31,8 +31,23 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 	if cfg.PlatformURL != "https://abc.apps.dynatrace.com" || cfg.ServerPort != "9098" || cfg.AuthMode != AuthModePlatformToken ||
 		cfg.QueryTimeout != 30*time.Second || cfg.ContainerLogsSource != "openchoreo-container-logs" ||
-		cfg.AuditLogsSource != "openchoreo-audit-logs" || cfg.LogLevel != slog.LevelInfo {
+		cfg.AuditLogsSource != "openchoreo-audit-logs" || cfg.LogLevel != slog.LevelInfo || cfg.AllowInsecureHTTP {
 		t.Errorf("unexpected defaults %+v", cfg)
+	}
+}
+
+func TestLoadConfigAllowInsecureHTTP(t *testing.T) {
+	setEnv(t, map[string]string{
+		"DT_PLATFORM_URL": "http://dtmock.dt-mock:8080", "DT_AUTH_MODE": "oauth",
+		"DT_OAUTH_CLIENT_ID": "id", "DT_OAUTH_CLIENT_SECRET": "s", "DT_OAUTH_TOKEN_URL": "http://dtmock.dt-mock:8080/token",
+		"DT_ALLOW_INSECURE_HTTP": "true",
+	})
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AllowInsecureHTTP || cfg.PlatformURL != "http://dtmock.dt-mock:8080" {
+		t.Errorf("unexpected %+v", cfg)
 	}
 }
 
@@ -64,9 +79,17 @@ func TestLoadConfigErrors(t *testing.T) {
 		return m
 	}
 	for name, env := range map[string]map[string]string{
-		"missing url":     {"DT_PLATFORM_TOKEN": "tok"},
-		"bad url":         with(map[string]string{"DT_PLATFORM_URL": "abc.apps.dynatrace.com"}),
-		"ftp url":         with(map[string]string{"DT_PLATFORM_URL": "ftp://abc"}),
+		"missing url":  {"DT_PLATFORM_TOKEN": "tok"},
+		"bad url":      with(map[string]string{"DT_PLATFORM_URL": "abc.apps.dynatrace.com"}),
+		"ftp url":      with(map[string]string{"DT_PLATFORM_URL": "ftp://abc"}),
+		"http url":     with(map[string]string{"DT_PLATFORM_URL": "http://abc.apps.dynatrace.com"}),
+		"no host url":  with(map[string]string{"DT_PLATFORM_URL": "https://"}),
+		"insecure ftp": with(map[string]string{"DT_PLATFORM_URL": "ftp://abc", "DT_ALLOW_INSECURE_HTTP": "true"}),
+		"bad insecure": with(map[string]string{"DT_ALLOW_INSECURE_HTTP": "maybe"}),
+		"oauth http token": with(map[string]string{
+			"DT_AUTH_MODE": "oauth", "DT_OAUTH_CLIENT_ID": "id", "DT_OAUTH_CLIENT_SECRET": "s",
+			"DT_OAUTH_TOKEN_URL": "http://sso.dynatrace.com/sso/oauth2/token",
+		}),
 		"missing token":   {"DT_PLATFORM_URL": "https://abc.apps.dynatrace.com"},
 		"oauth no client": with(map[string]string{"DT_AUTH_MODE": "oauth"}),
 		"bad auth mode":   with(map[string]string{"DT_AUTH_MODE": "basic"}),

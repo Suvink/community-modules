@@ -43,6 +43,10 @@ func main() {
 		tokens = dynatrace.StaticToken(cfg.PlatformToken)
 	}
 
+	if cfg.AllowInsecureHTTP {
+		logger.Warn("DT_ALLOW_INSECURE_HTTP is set: credentials may be sent over plain http. Use this for test doubles only")
+	}
+
 	client := dynatrace.NewClient(dynatrace.Config{
 		PlatformURL:         cfg.PlatformURL,
 		ContainerLogsSource: cfg.ContainerLogsSource,
@@ -63,7 +67,7 @@ func main() {
 	}
 	logger.Info("Connected to Dynatrace Grail")
 
-	srv := app.NewServer(cfg.ServerPort, app.NewLogsHandler(client, logger), logger)
+	srv := app.NewServer(cfg.ServerPort, cfg.QueryTimeout, app.NewLogsHandler(client, logger), logger)
 
 	go func() {
 		if err := srv.Start(); err != nil {

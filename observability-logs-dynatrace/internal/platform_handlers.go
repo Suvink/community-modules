@@ -24,6 +24,13 @@ func (h *LogsHandler) QueryPlatformLogs(
 		}, nil
 	}
 
+	if !request.Body.EndTime.After(request.Body.StartTime) {
+		return gen.QueryPlatformLogs400JSONResponse{
+			Title:   ptr(gen.BadRequest),
+			Message: ptr("endTime must be after startTime"),
+		}, nil
+	}
+
 	if key, ok := firstInvalidLabelKey(request.Body); !ok {
 		return gen.QueryPlatformLogs400JSONResponse{
 			Title:   ptr(gen.BadRequest),
@@ -87,6 +94,13 @@ func (h *LogsHandler) QueryPlatformLogFilterValues(
 		}, nil
 	}
 	body := request.Body
+
+	if !body.Query.EndTime.After(body.Query.StartTime) {
+		return gen.QueryPlatformLogFilterValues400JSONResponse{
+			Title:   ptr(gen.BadRequest),
+			Message: ptr("query.endTime must be after query.startTime"),
+		}, nil
+	}
 
 	if key, ok := firstInvalidLabelKey(&body.Query); !ok {
 		return gen.QueryPlatformLogFilterValues400JSONResponse{

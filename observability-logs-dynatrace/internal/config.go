@@ -30,6 +30,10 @@ type Config struct {
 	AuthMode     string
 	QueryTimeout time.Duration
 
+	// AllowInsecureHTTP accepts http:// for the credential-bearing URLs. For test doubles
+	// only: credentials then cross the network in cleartext.
+	AllowInsecureHTTP bool
+
 	PlatformToken string
 	OAuth         dynatrace.OAuthConfig
 
@@ -62,12 +66,17 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("invalid SERVER_PORT: %w", err)
 	}
 
+	allowInsecure, err := strconv.ParseBool(getEnv("DT_ALLOW_INSECURE_HTTP", "false"))
+	if err != nil {
+		return nil, fmt.Errorf("DT_ALLOW_INSECURE_HTTP must be true or false: %w", err)
+	}
+	cfg.AllowInsecureHTTP = allowInsecure
+
 	if cfg.PlatformURL == "" {
 		return nil, fmt.Errorf("environment variable DT_PLATFORM_URL is required")
 	}
-	u, err := url.Parse(cfg.PlatformURL)
-	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
-		return nil, fmt.Errorf("DT_PLATFORM_URL must be an http(s) URL with a host, got: %q", cfg.PlatformURL)
+	if err := checkCredentialURL("DT_PLATFORM_URL", cfg.PlatformURL, cfg.AllowInsecureHTTP); err != nil {
+		return nil, err
 	}
 
 	timeout, err := time.ParseDuration(getEnv("DT_QUERY_TIMEOUT", "30s"))
@@ -85,6 +94,9 @@ func LoadConfig() (*Config, error) {
 		if cfg.OAuth.ClientID == "" || cfg.OAuth.ClientSecret == "" {
 			return nil, fmt.Errorf("DT_OAUTH_CLIENT_ID and DT_OAUTH_CLIENT_SECRET are required when DT_AUTH_MODE=%s", AuthModeOAuth)
 		}
+		if err := checkCredentialURL("DT_OAUTH_TOKEN_URL", cfg.OAuth.TokenURL, cfg.AllowInsecureHTTP); err != nil {
+			return nil, err
+		}
 	default:
 		return nil, fmt.Errorf("DT_AUTH_MODE must be %q or %q, got %q", AuthModePlatformToken, AuthModeOAuth, cfg.AuthMode)
 	}
@@ -94,6 +106,19 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// checkCredentialURL rejects a URL credentials are sent to unless it is https with a host.
+// allowInsecure also accepts http.
+func checkCredentialURL(name, raw string, allowInsecure bool) error {
+	u, err := url.Parse(raw)
+	if err == nil && u.Host != "" && (u.Scheme == "https" || (allowInsecure && u.Scheme == "http")) {
+		return nil
+	}
+	if allowInsecure {
+		return fmt.Errorf("%s must be an http(s) URL with a host, got: %q", name, raw)
+	}
+	return fmt.Errorf("%s must be an https URL with a host, got: %q (set DT_ALLOW_INSECURE_HTTP=true to allow http)", name, raw)
 }
 
 func parseLogLevel(level string) slog.Level {
