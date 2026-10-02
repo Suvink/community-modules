@@ -171,6 +171,44 @@ func TestNewOAuthTokenSourceDefaults(t *testing.T) {
 	if s.cfg.TokenURL != DefaultOAuthTokenURL || s.cfg.Scope != DefaultOAuthScope {
 		t.Errorf("defaults not applied: %+v", s.cfg)
 	}
+	if s.httpClient.Timeout != 15*time.Second {
+		t.Errorf("default timeout %s", s.httpClient.Timeout)
+	}
+}
+
+// redirectTrap answers every request with a 307 to a second server, and counts the requests
+// that second server receives.
+func redirectTrap(t *testing.T) (redirector *httptest.Server, followed *atomic.Int32) {
+	t.Helper()
+	followed = &atomic.Int32{}
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { followed.Add(1) }))
+	t.Cleanup(target.Close)
+	redirector = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(redirector.Close)
+	return redirector, followed
+}
+
+func TestDefaultClientsDoNotFollowRedirects(t *testing.T) {
+	srv, followed := redirectTrap(t)
+
+	s := NewOAuthTokenSource(OAuthConfig{TokenURL: srv.URL, ClientID: "id", ClientSecret: "secret"}, nil)
+	if _, err := s.Token(context.Background()); err == nil || !strings.Contains(err.Error(), "307") {
+		t.Errorf("OAuth: expected a 307 error, got %v", err)
+	}
+
+	c := NewClient(Config{PlatformURL: srv.URL}, StaticToken("t"), nil, discardLogger())
+	if c.httpClient.Timeout != 60*time.Second {
+		t.Errorf("default timeout %s", c.httpClient.Timeout)
+	}
+	if err := c.Ping(context.Background()); err == nil || !strings.Contains(err.Error(), "307") {
+		t.Errorf("query: expected a 307 error, got %v", err)
+	}
+
+	if n := followed.Load(); n != 0 {
+		t.Errorf("redirect target received %d requests", n)
+	}
 }
 
 func TestGetComponentLogs(t *testing.T) {

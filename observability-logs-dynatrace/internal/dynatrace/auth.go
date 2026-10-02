@@ -72,7 +72,7 @@ func NewOAuthTokenSource(cfg OAuthConfig, httpClient *http.Client) *OAuthTokenSo
 		cfg.Scope = DefaultOAuthScope
 	}
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 15 * time.Second}
+		httpClient = newNoRedirectClient(15 * time.Second)
 	}
 	return &OAuthTokenSource{cfg: cfg, httpClient: httpClient, now: time.Now}
 }

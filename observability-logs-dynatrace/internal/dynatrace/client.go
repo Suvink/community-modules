@@ -63,10 +63,21 @@ type Client struct {
 	auditBucket string
 }
 
+// Returns an HTTP client that answers a redirect with the 3xx response
+// instead of following it.
+func newNoRedirectClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
 // NewClient returns a client for the given environment.
 func NewClient(cfg Config, tokens TokenSource, httpClient *http.Client, logger *slog.Logger) *Client {
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 60 * time.Second}
+		httpClient = newNoRedirectClient(60 * time.Second)
 	}
 	timeout := cfg.QueryTimeout
 	if timeout <= 0 {
