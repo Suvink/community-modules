@@ -2,9 +2,10 @@
 # ReleaseBindings: Per-Environment Roar Keys for the Support-Triage Agent
 # =============================================================================
 #
-# Each environment binds its own Roar key, so spend caps are isolated:
-#   - Development:  small-cap key, inexpensive model (component default)
-#   - Production:   larger-cap key, stronger model
+# The trait reads each environment's Roar key from roar/<environment>, so
+# spend caps are isolated without any key configuration here:
+#   - Development:  roar/development (small-cap key), component default model
+#   - Production:   roar/production (larger-cap key), stronger model
 # =============================================================================
 
 # --- Development Environment ---
@@ -18,10 +19,6 @@ spec:
     projectName: default
     componentName: support-agent
   environment: development
-  traitEnvironmentConfigs:
-    # Key = trait instanceName from Component.spec.traits
-    llm:
-      remoteKey: roar/development/support-agent
 
 ---
 
@@ -37,6 +34,6 @@ spec:
     componentName: support-agent
   environment: production
   traitEnvironmentConfigs:
+    # Key = trait instanceName from Component.spec.traits
     llm:
-      remoteKey: roar/production/support-agent
       model: claude-sonnet-5-5
